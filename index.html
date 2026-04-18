@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foxtable</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+    --bg: #0d0f14;
+    --panel: #151922;
+    --panel2: #1b2130;
+    --accent: #5b8cff;
+    --text: #e6e9ef;
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI';
+    background: var(--bg);
+    color: var(--text);
+}
+
+#topbar {
+    height: 45px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 15px;
+    border-bottom: 1px solid #222;
+}
+
+#hud {
+    display: flex;
+    height: calc(100vh - 45px);
+}
+
+#sidebar {
+    width: 220px;
+    padding: 10px;
+    border-right: 1px solid #222;
+    overflow: auto;
+}
+
+#workspace {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+}
+
+#properties {
+    width: 260px;
+    padding: 15px;
+    border-left: 1px solid #222;
+    overflow: auto;
+}
+
+canvas {
+    width: 95% !important;
+    height: 95% !important;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 0 30px rgba(0,0,0,0.4);
+}
+
+#grafico-titulo {
+    position: absolute;
+    top: 10px;
+    font-size: 20px;
+}
+
+input, select {
+    width: 100%;
+    padding: 8px;
+    margin: 6px 0;
+    border: none;
+    border-radius: 6px;
+    background: var(--panel2);
+    color: white;
+}
+
+button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    border: none;
+    border-radius: 6px;
+    background: var(--panel2);
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background: var(--accent);
+}
+
+.grafico-item {
+    padding: 8px;
+    margin: 5px 0;
+    background: var(--panel2);
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.grafico-item.ativo {
+    outline: 2px solid var(--accent);
+}
+
+#toast {
+    position: fixed;
+    bottom: 15px;
+    right: 15px;
+    background: #222;
+    padding: 10px;
+    border-radius: 5px;
+    opacity: 0;
+    transition: .3s;
+}
+</style>
+</head>
+
+<body>
+
+<div id="topbar">
+    <div>Foxtable</div>
+    <input id="busca" placeholder="Buscar...">
+</div>
+
+<div id="hud">
+
+    <div id="sidebar">
+        <button onclick="novoGrafico()">+ Novo</button>
+        <div id="lista"></div>
+    </div>
+
+    <div id="workspace">
+        <div id="grafico-titulo"></div>
+        <canvas id="grafico"></canvas>
+    </div>
+
+    <div id="properties">
+        <h3>Propriedades</h3>
+
+        <input id="titulo" placeholder="Título">
+        <select id="tipo">
+            <option value="bar">Barra</option>
+            <option value="line">Linha</option>
+            <option value="pie">Pizza</option>
+            <option value="doughnut">Doughnut</option>
+            <option value="radar">Radar</option>
+        </select>
+
+        <input id="dados" placeholder="10,20,30">
+        <input id="labels" placeholder="A,B,C">
+
+        <select id="paleta">
+            <option value="vibrante">Vibrante</option>
+            <option value="pastel">Pastel</option>
+            <option value="neon">Neon</option>
+            <option value="sunset">Sunset</option>
+            <option value="ocean">Ocean</option>
+            <option value="fire">Fire</option>
+            <option value="random">Aleatório</option>
+        </select>
+
+        <button onclick="atualizarGrafico()">Salvar</button>
+        <button onclick="duplicarGrafico()">Duplicar</button>
+        <button onclick="limparGrafico()">Limpar</button>
+        <button onclick="excluirGrafico()">Excluir</button>
+
+        <hr>
+
+        <button onclick="exportarPNG()">Exportar PNG</button>
+        <button onclick="exportarJSON()">Exportar Projeto</button>
+        <input type="file" onchange="importarJSON(event)">
+    </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+let chart;
+let graficos = [];
+let selecionado = null;
+
+const $ = id => document.getElementById(id);
+
+function toast(msg){
+    const t = $("toast");
+    t.innerText = msg;
+    t.style.opacity = 1;
+    setTimeout(()=>t.style.opacity=0,2000);
+}
+
+function gerarCores(qtd,tipo){
+    const p={
+        vibrante:["#ff595e","#ffca3a","#8ac926","#1982c4","#6a4c93"],
+        pastel:["#ffd6e0","#caffbf","#9bf6ff","#bdb2ff","#ffc6ff"],
+        neon:["#00f5d4","#ff00ff","#39ff14","#ffea00","#00bbf9"],
+        sunset:["#ff7b00","#ff006e","#8338ec","#3a86ff"],
+        ocean:["#003f5c","#2f4b7c","#665191","#a05195","#d45087"],
+        fire:["#ff0000","#ff5400","#ffbd00","#ffea00"],
+        random:Array.from({length:qtd},()=>`hsl(${Math.random()*360},70%,60%)`)
+    };
+    const base=p[tipo]||p.vibrante;
+    return Array.from({length:qtd},(_,i)=>base[i%base.length]);
+}
+
+function novoGrafico(){
+    const g={
+        id:Date.now(),
+        titulo:"Novo gráfico",
+        tipo:"bar",
+        dados:[10,20,30],
+        labels:["A","B","C"],
+        paleta:"vibrante"
+    };
+    graficos.push(g);
+    selecionar(g.id);
+    atualizarLista();
+}
+
+function selecionar(id){
+    selecionado=id;
+    const g=graficos.find(x=>x.id===id);
+
+    titulo.value=g.titulo;
+    tipo.value=g.tipo;
+    dados.value=g.dados.join(",");
+    labels.value=g.labels.join(",");
+    paleta.value=g.paleta;
+
+    desenhar(g);
+    atualizarLista();
+}
+
+function desenhar(g){
+    const ctx=$("grafico").getContext("2d");
+
+    if(!chart){
+        chart=new Chart(ctx,{type:g.tipo,data:{},options:{}});
+    }
+
+    const cores=gerarCores(g.dados.length,g.paleta);
+
+    chart.config.type=g.tipo;
+
+    chart.data={
+        labels:g.labels,
+        datasets:[{
+            label:g.titulo,
+            data:g.dados,
+            backgroundColor:cores,
+            borderColor:"#111",
+            borderWidth:2,
+            borderRadius:8,
+            tension:0.35,
+            fill:g.tipo==="line"
+        }]
+    };
+
+    chart.options={
+        responsive:true,
+        animation:{duration:800},
+        plugins:{
+            legend:{labels:{color:"#ddd"}},
+            tooltip:{backgroundColor:"#111"}
+        },
+        scales:(g.tipo==="pie"||g.tipo==="doughnut")?{}:{
+            x:{ticks:{color:"#aaa"}},
+            y:{ticks:{color:"#aaa"}}
+        }
+    };
+
+    chart.update();
+    $("grafico-titulo").innerText=g.titulo;
+}
+
+function atualizarGrafico(){
+    if(!selecionado)return;
+    const g=graficos.find(x=>x.id===selecionado);
+
+    const d=dados.value.split(',').map(Number);
+    const l=labels.value.split(',');
+
+    Object.assign(g,{
+        titulo:titulo.value,
+        tipo:tipo.value,
+        dados:d,
+        labels:l,
+        paleta:paleta.value
+    });
+
+    desenhar(g);
+    atualizarLista();
+    salvar();
+}
+
+function duplicarGrafico(){
+    const g=graficos.find(x=>x.id===selecionado);
+    const c={...g,id:Date.now(),titulo:g.titulo+" copia"};
+    graficos.push(c);
+    selecionar(c.id);
+}
+
+function excluirGrafico(){
+    graficos=graficos.filter(g=>g.id!==selecionado);
+    selecionado=null;
+    if(chart){chart.destroy();chart=null;}
+    atualizarLista();
+}
+
+function limparGrafico(){
+    const g=graficos.find(x=>x.id===selecionado);
+    g.dados=[];
+    g.labels=[];
+    desenhar(g);
+}
+
+function atualizarLista(){
+    lista.innerHTML="";
+    graficos.forEach(g=>{
+        const d=document.createElement("div");
+        d.className="grafico-item"+(g.id===selecionado?" ativo":"");
+        d.innerText=g.titulo;
+        d.onclick=()=>selecionar(g.id);
+        lista.appendChild(d);
+    });
+}
+
+function exportarPNG(){
+    const link=document.createElement("a");
+    link.download="grafico.png";
+    link.href=chart.toBase64Image();
+    link.click();
+}
+
+function exportarJSON(){
+    const blob=new Blob([JSON.stringify(graficos)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="projeto.json";
+    a.click();
+}
+
+function importarJSON(e){
+    const file=e.target.files[0];
+    const reader=new FileReader();
+    reader.onload=evt=>{
+        graficos=JSON.parse(evt.target.result);
+        atualizarLista();
+        if(graficos.length)selecionar(graficos[0].id);
+    };
+    reader.readAsText(file);
+}
+
+function salvar(){
+    localStorage.setItem("fox",JSON.stringify(graficos));
+}
+
+function carregar(){
+    const d=localStorage.getItem("fox");
+    if(d){
+        graficos=JSON.parse(d);
+        if(graficos.length)selecionar(graficos[0].id);
+    }
+}
+
+dados.oninput=labels.oninput=()=>{if(selecionado)atualizarGrafico();}
+
+carregar();
+</script>
+
+</body>
+</html>
